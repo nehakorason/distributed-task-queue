@@ -13,7 +13,7 @@ import uuid
 import threading
 import random
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any
 
 import redis
@@ -59,6 +59,7 @@ JOB_DURATION = Histogram(
 )
 
 # ─── Job Handlers ─────────────────────────────────────────────────────────────
+
 
 def handle_data_processing(payload: Dict[str, Any]) -> str:
     """Simulate data processing workload."""
@@ -120,6 +121,7 @@ JOB_HANDLERS = {
 }
 
 # ─── Worker ───────────────────────────────────────────────────────────────────
+
 
 class Worker:
     def __init__(self):
@@ -299,6 +301,7 @@ class Worker:
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
+
 
 def main():
     worker = Worker()
