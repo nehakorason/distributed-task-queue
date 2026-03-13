@@ -1,0 +1,38 @@
+version: "3.9"
+# docker-compose.override.yml
+# Automatically loaded by `docker compose up` for local dev
+# Adds volume mounts for hot-reload and exposes extra debug ports
+
+services:
+  api:
+    environment:
+      SPRING_JPA_SHOW_SQL: "true"
+      LOGGING_LEVEL_COM_TASKQUEUE: "DEBUG"
+    volumes:
+      - ./api/target:/app/target:ro
+
+  worker-1:
+    environment:
+      POLL_INTERVAL: "0.5"
+      HEARTBEAT_INTERVAL: "5"
+    volumes:
+      - ./python-worker:/app:ro
+    command: ["python", "-u", "-W", "all", "worker.py"]
+
+  worker-2:
+    environment:
+      POLL_INTERVAL: "0.5"
+      HEARTBEAT_INTERVAL: "5"
+    volumes:
+      - ./python-worker:/app:ro
+    command: ["python", "-u", "-W", "all", "worker.py"]
+
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_LOG_STATEMENT: "mod"
+
+  redis:
+    ports:
+      - "6379:6379"

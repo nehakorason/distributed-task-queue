@@ -1,0 +1,50 @@
+# Java / Maven
+api/target/
+api/.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+
+# Python
+python-worker/__pycache__/
+python-worker/*.pyc
+python-worker/.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Node / React
+dashboard/node_modules/
+dashboard/build/
+dashboard/.env.local
+dashboard/.env.development.local
+dashboard/.env.test.local
+dashboard/.env.production.local
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Data volumes (local dev)
+postgres_data/
+redis_data/

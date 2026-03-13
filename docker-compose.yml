@@ -1,0 +1,171 @@
+version: "3.9"
+
+services:
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: taskqueue
+      POSTGRES_USER: taskqueue
+      POSTGRES_PASSWORD: taskqueue
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskqueue -d taskqueue"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tq-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Application Layer ──────────────────────────────────────────────────────
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: tq-api
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: taskqueue
+      DB_USER: taskqueue
+      DB_PASSWORD: taskqueue
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVER_PORT: 8080
+      WORKER_CONCURRENCY: 5
+      MAX_RETRIES: 3
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  worker-1:
+    build:
+      context: ./python-worker
+      dockerfile: Dockerfile
+    container_name: tq-worker-1
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_BASE_URL: http://api:8080
+      WORKER_ID: worker-1
+      WORKER_CONCURRENCY: 5
+      METRICS_PORT: 9090
+    ports:
+      - "9091:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9090/metrics')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  worker-2:
+    build:
+      context: ./python-worker
+      dockerfile: Dockerfile
+    container_name: tq-worker-2
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_BASE_URL: http://api:8080
+      WORKER_ID: worker-2
+      WORKER_CONCURRENCY: 5
+      METRICS_PORT: 9090
+    ports:
+      - "9092:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: tq-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Observability ──────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.49.0
+    container_name: tq-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+
+  grafana:
+    image: grafana/grafana:10.3.0
+    container_name: tq-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: taskqueue-net
