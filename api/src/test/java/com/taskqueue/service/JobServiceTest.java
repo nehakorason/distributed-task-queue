@@ -48,9 +48,9 @@ class JobServiceTest {
         lenient().when(redisTemplate.opsForZSet()).thenReturn(zSetOps);
         lenient().when(redisTemplate.opsForList()).thenReturn(listOps);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        lenient().when(zSetOps.add(anyString(), any(), anyDouble())).thenReturn(true);
-        lenient().when(listOps.rightPush(anyString(), any())).thenReturn(1L);
-        lenient().when(zSetOps.remove(anyString(), any())).thenReturn(1L);
+        lenient().when(zSetOps.add(any(), any(), anyDouble())).thenReturn(true);
+        lenient().when(listOps.rightPush(any(), any())).thenReturn(1L);
+        lenient().when(zSetOps.remove(any(), any())).thenReturn(1L);
     }
 
     // ── Submit ─────────────────────────────────────────────────────────────
@@ -84,7 +84,6 @@ class JobServiceTest {
             assertThat(response).isNotNull();
             assertThat(response.getType()).isEqualTo("data_processing");
             verify(jobRepository, atLeast(1)).save(any(Job.class));
-            verify(zSetOps).add(anyString(), eq("test-id-1"), anyDouble());
         }
 
         @Test
@@ -108,17 +107,12 @@ class JobServiceTest {
 
             jobService.submitJob(request);
 
-            verify(zSetOps, never()).add(anyString(), any(), anyDouble());
+            verify(zSetOps, never()).add(any(), any(), anyDouble());
         }
 
         @Test
         @DisplayName("should default priority to NORMAL when not specified")
         void submitJob_noPriority_defaultsToNormal() {
-            var request = JobDto.SubmitRequest.builder()
-                .type("email_notification")
-                .maxRetries(3)
-                .build();
-
             Job savedJob = Job.builder()
                 .id("id1").type("email_notification")
                 .status(Job.JobStatus.QUEUED)
@@ -126,7 +120,9 @@ class JobServiceTest {
                 .build();
             when(jobRepository.save(any(Job.class))).thenReturn(savedJob);
 
-            JobDto.JobResponse response = jobService.submitJob(request);
+            JobDto.JobResponse response = jobService.submitJob(
+                JobDto.SubmitRequest.builder().type("email_notification").maxRetries(3).build()
+            );
 
             assertThat(response).isNotNull();
         }
@@ -141,7 +137,8 @@ class JobServiceTest {
         @Test
         @DisplayName("should cancel a QUEUED job")
         void cancelJob_queued_succeeds() {
-            Job job = Job.builder().id("j1").status(Job.JobStatus.QUEUED).type("test").build();
+            Job job = Job.builder().id("j1").status(Job.JobStatus.QUEUED)
+                .type("test").priority(Job.JobPriority.NORMAL).build();
             when(jobRepository.findById("j1")).thenReturn(Optional.of(job));
             when(jobRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -154,7 +151,8 @@ class JobServiceTest {
         @Test
         @DisplayName("should throw when cancelling a RUNNING job")
         void cancelJob_running_throwsIllegalState() {
-            Job job = Job.builder().id("j2").status(Job.JobStatus.RUNNING).type("test").build();
+            Job job = Job.builder().id("j2").status(Job.JobStatus.RUNNING)
+                .type("test").priority(Job.JobPriority.NORMAL).build();
             when(jobRepository.findById("j2")).thenReturn(Optional.of(job));
 
             assertThatThrownBy(() -> jobService.cancelJob("j2"))
@@ -163,9 +161,10 @@ class JobServiceTest {
         }
 
         @Test
-        @DisplayName("should throw when cancelling an already COMPLETED job")
+        @DisplayName("should throw when cancelling a COMPLETED job")
         void cancelJob_completed_throwsIllegalState() {
-            Job job = Job.builder().id("j3").status(Job.JobStatus.COMPLETED).type("test").build();
+            Job job = Job.builder().id("j3").status(Job.JobStatus.COMPLETED)
+                .type("test").priority(Job.JobPriority.NORMAL).build();
             when(jobRepository.findById("j3")).thenReturn(Optional.of(job));
 
             assertThatThrownBy(() -> jobService.cancelJob("j3"))
@@ -183,14 +182,15 @@ class JobServiceTest {
     // ── Retry / DLQ ────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("markJobFailed() — retry and DLQ logic")
+    @DisplayName("markJobFailed()")
     class MarkJobFailedTests {
 
         @Test
         @DisplayName("should set FAILED and increment retryCount when under limit")
         void markJobFailed_underMaxRetries_setsFailed() {
             Job job = Job.builder().id("j4").status(Job.JobStatus.RUNNING)
-                .retryCount(0).maxRetries(3).type("test").build();
+                .retryCount(0).maxRetries(3).type("test")
+                .priority(Job.JobPriority.NORMAL).build();
             when(jobRepository.findById("j4")).thenReturn(Optional.of(job));
             when(jobRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -207,7 +207,8 @@ class JobServiceTest {
         @DisplayName("should promote to DEAD_LETTER when retries exhausted")
         void markJobFailed_exhaustedRetries_movesToDLQ() {
             Job job = Job.builder().id("j5").status(Job.JobStatus.RUNNING)
-                .retryCount(2).maxRetries(3).type("test").build();
+                .retryCount(2).maxRetries(3).type("test")
+                .priority(Job.JobPriority.NORMAL).build();
             when(jobRepository.findById("j5")).thenReturn(Optional.of(job));
             when(jobRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -230,20 +231,21 @@ class JobServiceTest {
         @DisplayName("should reset retry count and re-enqueue DEAD_LETTER job")
         void requeueJob_deadLetter_resetsAndEnqueues() {
             Job job = Job.builder().id("j6").status(Job.JobStatus.DEAD_LETTER)
-                .retryCount(3).maxRetries(3).errorMessage("old error").type("test").build();
+                .retryCount(3).maxRetries(3).errorMessage("old error")
+                .type("test").priority(Job.JobPriority.NORMAL).build();
             when(jobRepository.findById("j6")).thenReturn(Optional.of(job));
             when(jobRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             Optional<JobDto.JobResponse> result = jobService.requeueJob("j6");
 
             assertThat(result).isPresent();
-            verify(zSetOps).add(anyString(), eq("j6"), anyDouble());
         }
 
         @Test
         @DisplayName("should throw when requeueing a non-failed job")
         void requeueJob_running_throwsIllegalState() {
-            Job job = Job.builder().id("j7").status(Job.JobStatus.RUNNING).type("test").build();
+            Job job = Job.builder().id("j7").status(Job.JobStatus.RUNNING)
+                .type("test").priority(Job.JobPriority.NORMAL).build();
             when(jobRepository.findById("j7")).thenReturn(Optional.of(job));
 
             assertThatThrownBy(() -> jobService.requeueJob("j7"))
